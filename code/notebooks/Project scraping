@@ -1,0 +1,132 @@
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+import time
+import random
+
+def random_scroll(browser, total_wait_time):
+    total_height = browser.execute_script("return document.body.scrollHeight")
+    scroll_steps = random.randint(3, 10)
+    scroll_increment = total_height // scroll_steps
+    time_per_step = total_wait_time / scroll_steps
+    
+    for step in range(scroll_steps):
+        browser.execute_script(f"window.scrollBy(0, {scroll_increment});")
+        random_wait = random.uniform(0.5 * time_per_step, 1.5 * time_per_step)
+        time.sleep(random_wait)
+    
+    browser.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
+def scrape_season(browser, season):
+    # Wait for the table to load
+    time.sleep(3)
+    
+    # Get the team names - filter out empty strings
+    team_elements = browser.find_elements(By.CSS_SELECTOR, "td.Table__TD a[href*='/team/_/name/']")
+    teams = [team.text for team in team_elements if team.text.strip()]
+    
+    print(f"Season {season} - Number of teams found: {len(teams)}")
+
+    # Get all stat cells
+    stat_rows = browser.find_elements(By.CSS_SELECTOR, "tr.Table__TR")
+    
+    # Lists to store data
+    all_data = []
+    
+    # Process each row
+    for row in stat_rows:
+        cells = row.find_elements(By.CSS_SELECTOR, "td.Table__TD")
+        if cells:  # If we found cells
+            row_data = [cell.text for cell in cells]
+            if len(row_data) >= 19:  # Make sure we have all stats
+                all_data.append(row_data)
+
+    if len(teams) == len(all_data):
+        season_df = pd.DataFrame({
+            'Season': [season] * len(teams),
+            'Team': teams,
+            'GP': [row[0] for row in all_data],
+            'PTS': [row[1] for row in all_data],
+            'FGM': [row[2] for row in all_data],
+            'FGA': [row[3] for row in all_data],
+            'FG%': [row[4] for row in all_data],
+            '3PM': [row[5] for row in all_data],
+            '3PA': [row[6] for row in all_data],
+            '3P%': [row[7] for row in all_data],
+            'FTM': [row[8] for row in all_data],
+            'FTA': [row[9] for row in all_data],
+            'FT%': [row[10] for row in all_data],
+            'OREB': [row[11] for row in all_data],
+            'DREB': [row[12] for row in all_data],
+            'REB': [row[13] for row in all_data],
+            'AST': [row[14] for row in all_data],
+            'STL': [row[15] for row in all_data],
+            'BLK': [row[16] for row in all_data],
+            'TO': [row[17] for row in all_data],
+            'PF': [row[18] for row in all_data]
+        })
+        return season_df
+    else:
+        print(f"Length mismatch in season {season}: {len(teams)} teams vs {len(all_data)} stat rows")
+        return None
+
+# Initialize browser
+browser = webdriver.Chrome()
+
+try:
+    # List to store DataFrames for each season
+    all_seasons_data = []
+    
+    # Loop through the last 10 seasons (2025 is current season)
+    for season in range(2025, 2015, -1):
+        print(f"\nScraping season {season}...")
+        
+        # Navigate to URL for this season
+        url = f"https://www.espn.com/nba/stats/team/_/season/{season}/seasontype/2"
+        browser.get(url)
+        browser.maximize_window()
+
+        # Add random delay and scroll
+        total_wait_time = random.uniform(5, 12)
+        random_scroll(browser, total_wait_time)
+
+        # Scrape the season data
+        season_df = scrape_season(browser, season)
+        
+        if season_df is not None:
+            all_seasons_data.append(season_df)
+            print(f"Successfully scraped season {season}")
+        
+        # Random delay between seasons
+        time.sleep(random.uniform(3, 7))
+
+    # Combine all seasons into one DataFrame
+    if all_seasons_data:
+        final_df = pd.concat(all_seasons_data, ignore_index=True)
+        
+        # Convert numeric columns
+        numeric_cols = ['GP', 'PTS', 'FGM', 'FGA', 'FG%', '3PM', '3PA', '3P%', 
+                       'FTM', 'FTA', 'FT%', 'OREB', 'DREB', 'REB', 'AST', 
+                       'STL', 'BLK', 'TO', 'PF']
+        
+        for col in numeric_cols:
+            final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
+
+        # Save to CSV
+        final_df.to_csv('nba_team_stats_historical.csv', index=False)
+        print("\nAll data has been saved to nba_team_stats_historical.csv")
+        print("\nSample of final dataset:")
+        print(final_df.head())
+        
+        # Print some summary statistics
+        print("\nSeasons included:", final_df['Season'].unique())
+        print("Total number of team-seasons:", len(final_df))
+
+except Exception as e:
+    print(f"An error occurred: {str(e)}")
+    import traceback
+    print(traceback.format_exc())
+
+finally:
+    # Close browser
+    browser.close()
